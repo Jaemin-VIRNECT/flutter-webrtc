@@ -16,6 +16,12 @@ NSArray<RTCDesktopSource*>* _captureSources;
 
 @implementation FlutterWebRTCPlugin (DesktopCapturer)
 
+- (void)pickerPressed:(UIButton *)button result:(FlutterResult)result {
+  NSLog(@"Picker button pressed!");
+  if (result) {
+    result(@"Button pressed successfully");
+  }
+}
 - (void)getDisplayMedia:(NSDictionary*)constraints result:(FlutterResult)result {
   NSString* mediaStreamId = [[NSUUID UUID] UUIDString];
   RTCMediaStream* mediaStream = [self.peerConnectionFactory mediaStreamWithStreamId:mediaStreamId];
@@ -56,6 +62,12 @@ NSArray<RTCDesktopSource*>* _captureSources;
     picker.showsMicrophoneButton = false;
     if (extension) {
       picker.preferredExtension = extension;
+      for (UIView *subview in picker.subviews) {
+        if ([subview isKindOfClass:[UIButton class]]) {
+          UIButton *button = (UIButton *)subview;
+          [button addTarget:self action:@selector(pickerPressed:result:) forControlEvents:UIControlEventTouchUpInside];
+        }
+      }
     } else {
       NSLog(@"Not able to find the %@ key", kRTCScreenSharingExtension);
     }
