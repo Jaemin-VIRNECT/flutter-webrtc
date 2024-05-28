@@ -87,6 +87,7 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
             throw new RuntimeException("capturer is disposed.");
         }
     }
+
     public synchronized void initialize(final SurfaceTextureHelper surfaceTextureHelper,
                                         final Context applicationContext, final CapturerObserver capturerObserver) {
         checkNotDisposed();
@@ -104,6 +105,7 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
         this.mediaProjectionManager = (MediaProjectionManager) applicationContext.getSystemService(
                 Context.MEDIA_PROJECTION_SERVICE);
     }
+
     @Override
     public synchronized void startCapture(
             final int width, final int height, final int ignoredFramerate) {
@@ -128,6 +130,7 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
         capturerObserver.onCapturerStarted(true);
         surfaceTextureHelper.startListening(this);
     }
+
     @Override
     public synchronized void stopCapture() {
         checkNotDisposed();
@@ -150,16 +153,18 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
             }
         });
     }
+
     @Override
     public synchronized void dispose() {
         isDisposed = true;
     }
+
     /**
      * Changes output video format. This method can be used to scale the output
      * video, or to change orientation when the captured screen is rotated for example.
      *
-     * @param width new output video width
-     * @param height new output video height
+     * @param width            new output video width
+     * @param height           new output video height
      * @param ignoredFramerate ignored
      */
     @Override
@@ -203,7 +208,7 @@ public class OrientationAwareScreenCapturer implements VideoCapturer, VideoSink 
             }
         }
     }
-    }
+
     private void createVirtualDisplay() {
         surfaceTextureHelper.setTextureSize(width, height);
         surfaceTextureHelper.getSurfaceTexture().setDefaultBufferSize(width, height);
