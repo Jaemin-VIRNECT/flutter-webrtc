@@ -54,7 +54,7 @@ class _GetUserMediaSampleState extends State<GetUserMediaSample> {
   // Platform messages are asynchronous, so we initialize in an async method.
   void _makeCall() async {
     final mediaConstraints = <String, dynamic>{
-      'audio': false,
+      'audio': true,
       'video': {
         'mandatory': {
           'minWidth':
@@ -104,24 +104,28 @@ class _GetUserMediaSampleState extends State<GetUserMediaSample> {
       return;
     }
     // TODO(rostopira): request write storage permission
-    final storagePath = await getExternalStorageDirectory();
-    if (storagePath == null) throw Exception('Can\'t find storagePath');
-
-    final filePath = storagePath.path + '/webrtc_sample/test.mp4';
+    // final storagePath = await getExternalStorageDirectory();
+    // if (storagePath == null) throw Exception('Can\'t find storagePath');
+    //
+    // final filePath = storagePath.path + '/webrtc_sample/test.mp4';
     _mediaRecorder = MediaRecorder();
     setState(() {});
+    final storagePath = Directory("/storage/emulated/0/Download");
+
+    final filePath = storagePath.path + '/test.mp4';
 
     final videoTrack = _localStream!
         .getVideoTracks()
         .firstWhere((track) => track.kind == 'video');
     await _mediaRecorder!.start(
+      audioChannel: RecorderAudioChannel.OUTPUT,
       filePath,
       videoTrack: videoTrack,
     );
   }
 
   void _stopRecording() async {
-    await _mediaRecorder?.stop();
+    final path = await _mediaRecorder?.stop();
     setState(() {
       _mediaRecorder = null;
     });

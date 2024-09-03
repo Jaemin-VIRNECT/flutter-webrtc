@@ -13,15 +13,17 @@ public class MediaRecorderImpl {
 
     private final Integer id;
     private final VideoTrack videoTrack;
-    private final AudioSamplesInterceptor audioInterceptor;
+    private final AudioSamplesInterceptor inputAudioInterceptor;
+    private final OutputAudioSamplesInterceptor outputAudioInterceptor;
     private VideoFileRenderer videoFileRenderer;
     private boolean isRunning = false;
     private File recordFile;
 
-    public MediaRecorderImpl(Integer id, @Nullable VideoTrack videoTrack, @Nullable AudioSamplesInterceptor audioInterceptor) {
+    public MediaRecorderImpl(Integer id, @Nullable VideoTrack videoTrack, @Nullable AudioSamplesInterceptor inputAudioInterceptor, @Nullable OutputAudioSamplesInterceptor outputAudioInterceptor) {
         this.id = id;
         this.videoTrack = videoTrack;
-        this.audioInterceptor = audioInterceptor;
+        this.inputAudioInterceptor = inputAudioInterceptor;
+        this.outputAudioInterceptor = outputAudioInterceptor;
     }
 
     public void startRecording(File file) throws Exception {
@@ -35,14 +37,16 @@ public class MediaRecorderImpl {
             videoFileRenderer = new VideoFileRenderer(
                 file.getAbsolutePath(),
                 EglUtils.getRootEglBaseContext(),
-                audioInterceptor != null
+                inputAudioInterceptor != null || outputAudioInterceptor != null
             );
             videoTrack.addSink(videoFileRenderer);
-            if (audioInterceptor != null)
-                audioInterceptor.attachCallback(id, videoFileRenderer);
+            if (inputAudioInterceptor != null)
+                inputAudioInterceptor.attachCallback(id, videoFileRenderer);
+            if (outputAudioInterceptor != null)
+                outputAudioInterceptor.attachCallback(id, videoFileRenderer);
         } else {
             Log.e(TAG, "Video track is null");
-            if (audioInterceptor != null) {
+            if (inputAudioInterceptor != null || outputAudioInterceptor != null) {
                 //TODO(rostopira): audio only recording
                 throw new Exception("Audio-only recording not implemented yet");
             }
@@ -53,8 +57,10 @@ public class MediaRecorderImpl {
 
     public void stopRecording() {
         isRunning = false;
-        if (audioInterceptor != null)
-            audioInterceptor.detachCallback(id);
+        if (inputAudioInterceptor != null)
+            inputAudioInterceptor.detachCallback(id);
+        if (outputAudioInterceptor != null)
+            outputAudioInterceptor.detachCallback(id);
         if (videoTrack != null && videoFileRenderer != null) {
             videoTrack.removeSink(videoFileRenderer);
             videoFileRenderer.release();

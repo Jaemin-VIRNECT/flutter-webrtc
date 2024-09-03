@@ -1,5 +1,6 @@
 package com.cloudwebrtc.webrtc;
 
+import android.util.Log;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Fragment;
@@ -956,16 +957,21 @@ class GetUserMediaImpl {
     void startRecordingToFile(
             String path, Integer id, @Nullable VideoTrack videoTrack, @Nullable AudioChannel audioChannel)
             throws Exception {
-        AudioSamplesInterceptor interceptor = null;
-        if (audioChannel == AudioChannel.INPUT) {
-            interceptor = inputSamplesInterceptor;
-        } else if (audioChannel == AudioChannel.OUTPUT) {
-            if (outputSamplesInterceptor == null) {
-                outputSamplesInterceptor = new OutputAudioSamplesInterceptor(audioDeviceModule);
+        AudioSamplesInterceptor inputInterceptor = null;
+        OutputAudioSamplesInterceptor outputInterceptor = null;
+
+        if(audioChannel!=null) {
+            if (audioChannel == AudioChannel.INPUT) {
+                inputInterceptor = inputSamplesInterceptor;
+            }else if (audioChannel == AudioChannel.OUTPUT) {
+                inputInterceptor = inputSamplesInterceptor;
+                if (outputSamplesInterceptor == null) {
+                    outputSamplesInterceptor = new OutputAudioSamplesInterceptor(audioDeviceModule);
+                }
+                outputInterceptor = outputSamplesInterceptor;
             }
-            interceptor = outputSamplesInterceptor;
         }
-        MediaRecorderImpl mediaRecorder = new MediaRecorderImpl(id, videoTrack, interceptor);
+        MediaRecorderImpl mediaRecorder = new MediaRecorderImpl(id, videoTrack, inputInterceptor, outputInterceptor);
         mediaRecorder.startRecording(new File(path));
         mediaRecorders.append(id, mediaRecorder);
     }
@@ -975,16 +981,16 @@ class GetUserMediaImpl {
         if (mediaRecorder != null) {
             mediaRecorder.stopRecording();
             mediaRecorders.remove(id);
-            File file = mediaRecorder.getRecordFile();
-            if (file != null) {
-                ContentValues values = new ContentValues(3);
-                values.put(MediaStore.Video.Media.TITLE, file.getName());
-                values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
-                values.put(MediaStore.Video.Media.DATA, file.getAbsolutePath());
-                applicationContext
-                        .getContentResolver()
-                        .insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
-            }
+//            File file = mediaRecorder.getRecordFile();
+//            if (file != null) {
+//                ContentValues values = new ContentValues(3);
+//                values.put(MediaStore.Video.Media.TITLE, file.getName());
+//                values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+//                values.put(MediaStore.Video.Media.DATA, file.getAbsolutePath());
+//                applicationContext
+//                        .getContentResolver()
+//                        .insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+//            }
         }
     }
 
@@ -1104,7 +1110,7 @@ class GetUserMediaImpl {
 
                 final double desiredZoomLevel = Math.max(1.0, Math.min(zoomLevel, maxZoomLevel));
 
-                float ratio = 1.0f / (float)desiredZoomLevel;
+                float ratio = 1.0f / (float) desiredZoomLevel;
 
                 if (rect != null) {
                     int croppedWidth = rect.width() - Math.round((float) rect.width() * ratio);
@@ -1153,10 +1159,10 @@ class GetUserMediaImpl {
             Camera.Parameters params = camera.getParameters();
             params.setFlashMode(
                     isTorchOn ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF);
-            if(params.isZoomSupported()) {
+            if (params.isZoomSupported()) {
                 int maxZoom = params.getMaxZoom();
                 double desiredZoom = Math.max(0, Math.min(zoomLevel, maxZoom));
-                params.setZoom((int)desiredZoom);
+                params.setZoom((int) desiredZoom);
                 result.success(null);
                 return;
             }
@@ -1338,7 +1344,7 @@ class GetUserMediaImpl {
         if (devices.length > 0) {
             for (int i = 0; i < devices.length; i++) {
                 AudioDeviceInfo device = devices[i];
-                if(deviceId.equals(AudioUtils.getAudioDeviceId(device))) {
+                if (deviceId.equals(AudioUtils.getAudioDeviceId(device))) {
                     preferredInput = device;
                     audioDeviceModule.setPreferredInputDevice(preferredInput);
                     return;
