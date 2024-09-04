@@ -41,9 +41,12 @@ public class MediaRecorderImpl {
             );
             videoTrack.addSink(videoFileRenderer);
             if (inputAudioInterceptor != null)
+                Log.e(TAG, "inputAudioInterceptor = " + inputAudioInterceptor);
                 inputAudioInterceptor.attachCallback(id, videoFileRenderer);
-            if (outputAudioInterceptor != null)
+            if (outputAudioInterceptor != null) {
+                Log.e(TAG, "outputAudioInterceptor = " + outputAudioInterceptor);
                 outputAudioInterceptor.attachCallback(id, videoFileRenderer);
+            }
         } else {
             Log.e(TAG, "Video track is null");
             if (inputAudioInterceptor != null || outputAudioInterceptor != null) {

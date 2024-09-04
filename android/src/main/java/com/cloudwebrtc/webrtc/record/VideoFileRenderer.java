@@ -243,6 +243,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     private void processAudioSamples(Boolean isMic, JavaAudioDeviceModule.AudioSamples samples, MediaCodec audioEncoder,
                                      MediaCodec.BufferInfo bufferInfo, int trackIndex) {
+        Log.e("processAudioSamples", "isMic = " + isMic );
         int inputBufferIndex = audioEncoder.dequeueInputBuffer(0);
         if (inputBufferIndex >= 0) {
             ByteBuffer inputBuffer = audioEncoder.getInputBuffer(inputBufferIndex);
@@ -263,6 +264,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         }
 
         int outputBufferIndex = audioEncoder.dequeueOutputBuffer(bufferInfo, 0);
+        Log.e("processAudioSamples", "outputBufferIndex = " + outputBufferIndex + "muxerStarted = " + muxerStarted );
         while (outputBufferIndex >= 0) {
             ByteBuffer outputBuffer = audioEncoder.getOutputBuffer(outputBufferIndex);
             if (muxerStarted) {
