@@ -282,8 +282,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             } else {
                 speakerPresTime += samples.getData().length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
             }
-            drainAudio(isMic);
         }
+        drainAudio(isMic);
     }
 
     private void drainAudio(Boolean isMic) {
@@ -351,10 +351,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                     ByteBuffer encodedData;
                     if (isMic) {
                         encodedData = micOutputBuffers[encoderStatus];
-
                     } else {
                         encodedData = speakerOutputBuffers[encoderStatus];
-
                     }
                     if (encodedData == null) {
                         Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
