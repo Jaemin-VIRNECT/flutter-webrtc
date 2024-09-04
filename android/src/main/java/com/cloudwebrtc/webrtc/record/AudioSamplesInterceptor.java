@@ -2,14 +2,17 @@ package com.cloudwebrtc.webrtc.record;
 
 import android.annotation.SuppressLint;
 
+import org.webrtc.audio.JavaAudioDeviceModule;
 import org.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
 import org.webrtc.audio.JavaAudioDeviceModule.AudioSamples;
 
 import java.util.HashMap;
 
-/** JavaAudioDeviceModule allows attaching samples callback only on building
- *  We don't want to instantiate VideoFileRenderer and codecs at this step
- *  It's simple dummy class, it does nothing until samples are necessary */
+/**
+ * JavaAudioDeviceModule allows attaching samples callback only on building
+ * We don't want to instantiate VideoFileRenderer and codecs at this step
+ * It's simple dummy class, it does nothing until samples are necessary
+ */
 @SuppressWarnings("WeakerAccess")
 public class AudioSamplesInterceptor implements SamplesReadyCallback {
 
@@ -30,5 +33,4 @@ public class AudioSamplesInterceptor implements SamplesReadyCallback {
     public void detachCallback(Integer id) {
         callbacks.remove(id);
     }
-
 }
