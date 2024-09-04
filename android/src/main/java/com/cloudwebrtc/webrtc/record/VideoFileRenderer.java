@@ -166,7 +166,9 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat newFormat = videoEncoder.getOutputFormat();
                 Log.e(TAG, "encoder output format changed: " + newFormat);
-                videoTrackIndex = mediaMuxer.addTrack(newFormat);
+                if (muxerStarted) {
+                    videoTrackIndex = mediaMuxer.addTrack(newFormat);
+                }
                 Log.e("drainVideoEncoder", "micTrackIndex = " + micTrackIndex + ", speakerTrackIndex = " + speakerTrackIndex);
                 if (micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
                     mediaMuxer.start();
@@ -277,12 +279,12 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         ByteBuffer[] audioOutputBuffers;
         if (isMic) {
             audioOutputBuffers = micOutputBuffers;
-            if(micBufferInfo == null) {
+            if (micBufferInfo == null) {
                 micBufferInfo = new MediaCodec.BufferInfo();
             }
         } else {
             audioOutputBuffers = speakerOutputBuffers;
-            if(speakerBufferInfo == null) {
+            if (speakerBufferInfo == null) {
                 speakerBufferInfo = new MediaCodec.BufferInfo();
             }
         }
@@ -294,7 +296,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 // not expected for an encoder
                 if (isMic) {
                     micOutputBuffers = audioEncoder.getOutputBuffers();
-                }else{
+                } else {
                     speakerOutputBuffers = audioEncoder.getOutputBuffers();
                 }
                 Log.w(TAG, "encoder output buffers changed");
@@ -304,13 +306,17 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
                 Log.w(TAG, "encoder output format changed: " + newFormat);
                 if (isMic) {
-                    micTrackIndex = mediaMuxer.addTrack(newFormat);
+                    if (muxerStarted) {
+                        micTrackIndex = mediaMuxer.addTrack(newFormat);
+                    }
                     if (micTrackIndex != -1 && !muxerStarted) {
                         mediaMuxer.start();
                         muxerStarted = true;
                     }
                 } else {
-                    speakerTrackIndex = mediaMuxer.addTrack(newFormat);
+                    if (muxerStarted) {
+                        speakerTrackIndex = mediaMuxer.addTrack(newFormat);
+                    }
                     if (speakerTrackIndex != -1 && !muxerStarted) {
                         mediaMuxer.start();
                         muxerStarted = true;
