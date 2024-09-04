@@ -4,6 +4,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -73,6 +74,9 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         this.sharedContext = sharedContext;
 
         mediaMuxer = new MediaMuxer(outputFile, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+
+        micTrackIndex = withAudio ? -1 : 0;
+        speakerTrackIndex = withAudio ? -1 : 0;
     }
 
     private void initVideoEncoder() {
@@ -81,7 +85,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         format.setInteger(MediaFormat.KEY_BIT_RATE, 6000000);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL);
-
         try {
             videoEncoder = MediaCodec.createEncoderByType(MIME_TYPE);
             videoEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
