@@ -218,7 +218,10 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     @Override
     public void onWebRtcAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples samples) {
-        if (!isRunning) return;
+        if (!isRunning) {
+            Log.e(TAG, "onWebRtcAudioRecordSamples !isRunning");
+            return;
+        }
         inputAudioThreadHandler.post(() -> {
             if (micAudioEncoder == null) try {
                 micAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
@@ -249,7 +252,10 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     }
 
     public void onWebRtcOutputAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples samples) {
-        if (!isRunning) return;
+        if (!isRunning) {
+            Log.e(TAG, "onWebRtcOutputAudioRecordSamplesReady !isRunning");
+            return;
+        }
         outputAudioThreadHandler.post(() -> {
             if (speakerAudioEncoder == null) try {
                 speakerAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
@@ -315,7 +321,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             } else { // encoderStatus >= 0
                 try {
                     ByteBuffer encodedData = micOutputBuffers[encoderStatus];
-
                     if (encodedData == null) {
                         Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
                         break;

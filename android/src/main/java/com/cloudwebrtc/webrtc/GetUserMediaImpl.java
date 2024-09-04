@@ -960,10 +960,10 @@ class GetUserMediaImpl {
         AudioSamplesInterceptor inputInterceptor = null;
         OutputAudioSamplesInterceptor outputInterceptor = null;
 
-        if(audioChannel!=null) {
+        if (audioChannel != null) {
             if (audioChannel == AudioChannel.INPUT) {
                 inputInterceptor = inputSamplesInterceptor;
-            }else if (audioChannel == AudioChannel.OUTPUT) {
+            } else if (audioChannel == AudioChannel.OUTPUT) {
                 inputInterceptor = inputSamplesInterceptor;
                 if (outputSamplesInterceptor == null) {
                     outputSamplesInterceptor = new OutputAudioSamplesInterceptor(audioDeviceModule);
