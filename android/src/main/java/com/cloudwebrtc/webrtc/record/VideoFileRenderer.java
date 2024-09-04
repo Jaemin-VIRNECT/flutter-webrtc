@@ -241,7 +241,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             if (micAudioEncoder == null) {
                 initMicAudioEncoder(samples.getChannelCount(), samples.getSampleRate());
             }
-            processAudioSamples(true, samples, micAudioEncoder, micBufferInfo, micTrackIndex);
+            processAudioSamples(true, samples, micAudioEncoder, micTrackIndex);
         });
     }
 
@@ -251,15 +251,14 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             if (speakerAudioEncoder == null) {
                 initSpeakerAudioEncoder(samples.getChannelCount(), samples.getSampleRate());
             }
-            processAudioSamples(false, samples, speakerAudioEncoder, speakerBufferInfo, speakerTrackIndex);
+            processAudioSamples(false, samples, speakerAudioEncoder, speakerTrackIndex);
         });
     }
 
     private long micPresTime = 0L;
     private long speakerPresTime = 0L;
 
-    private void processAudioSamples(Boolean isMic, JavaAudioDeviceModule.AudioSamples samples, MediaCodec audioEncoder,
-                                     MediaCodec.BufferInfo bufferInfo, int trackIndex) {
+    private void processAudioSamples(Boolean isMic, JavaAudioDeviceModule.AudioSamples samples, MediaCodec audioEncoder, int trackIndex) {
         int bufferIndex = audioEncoder.dequeueInputBuffer(0);
         if (bufferIndex >= 0) {
             ByteBuffer buffer = audioEncoder.getInputBuffer(bufferIndex);
@@ -279,21 +278,26 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             }
         }
 
-        drainAudio(isMic, bufferInfo, audioEncoder);
+        drainAudio(isMic, audioEncoder);
     }
 
-    private void drainAudio(Boolean isMic, MediaCodec.BufferInfo audioBufferInfo, MediaCodec audioEncoder) {
-        if (isMic) {
-            if (micBufferInfo == null) {
-                micBufferInfo = new MediaCodec.BufferInfo();
-            }
-        } else {
-            if (speakerBufferInfo == null) {
-                speakerBufferInfo = new MediaCodec.BufferInfo();
-            }
-        }
+    private void drainAudio(Boolean isMic, MediaCodec audioEncoder) {
         while (true) {
-
+            if (isMic) {
+                if (micBufferInfo == null) {
+                    micBufferInfo = new MediaCodec.BufferInfo();
+                }
+            } else {
+                if (speakerBufferInfo == null) {
+                    speakerBufferInfo = new MediaCodec.BufferInfo();
+                }
+            }
+            MediaCodec.BufferInfo audioBufferInfo;
+            if (isMic) {
+                audioBufferInfo = micBufferInfo;
+            } else {
+                audioBufferInfo = speakerBufferInfo;
+            }
             int encoderStatus = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
