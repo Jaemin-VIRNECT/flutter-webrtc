@@ -169,6 +169,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 MediaFormat newFormat = videoEncoder.getOutputFormat();
                 Log.e(TAG, "encoder output format changed: " + newFormat);
                 videoTrackIndex = mediaMuxer.addTrack(newFormat);
+                Log.e("drainVideoEncoder", "micTrackIndex = " + micTrackIndex + ", speakerTrackIndex = " + speakerTrackIndex);
                 if (micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -252,19 +253,18 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     private void processAudioSamples(Boolean isMic, JavaAudioDeviceModule.AudioSamples samples, MediaCodec audioEncoder,
                                      MediaCodec.BufferInfo bufferInfo, int trackIndex) {
-        Log.e("processAudioSamples", "isMic = " + isMic );
-        int inputBufferIndex = audioEncoder.dequeueInputBuffer(0);
-        if (inputBufferIndex >= 0) {
-            ByteBuffer inputBuffer = audioEncoder.getInputBuffer(inputBufferIndex);
-            inputBuffer.clear();
-            inputBuffer.put(samples.getData());
+        int bufferIndex = audioEncoder.dequeueInputBuffer(0);
+        if (bufferIndex >= 0) {
+            ByteBuffer buffer = audioEncoder.getInputBuffer(bufferIndex);
+            buffer.clear();
+            buffer.put(samples.getData());
             Long presentationTimeUs;
             if (isMic) {
                 presentationTimeUs = micPresTime;
             } else {
                 presentationTimeUs = speakerPresTime;
             }
-            audioEncoder.queueInputBuffer(inputBufferIndex, 0, samples.getData().length, presentationTimeUs, 0);
+            audioEncoder.queueInputBuffer(bufferIndex, 0, samples.getData().length, presentationTimeUs, 0);
             if (isMic) {
                 micPresTime += samples.getData().length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
             } else {
@@ -272,15 +272,75 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             }
         }
 
-        int outputBufferIndex = audioEncoder.dequeueOutputBuffer(bufferInfo, 0);
-        Log.e("processAudioSamples", "outputBufferIndex = " + outputBufferIndex + "muxerStarted = " + muxerStarted );
-        while (outputBufferIndex >= 0) {
-            ByteBuffer outputBuffer = audioEncoder.getOutputBuffer(outputBufferIndex);
-            if (muxerStarted) {
-                mediaMuxer.writeSampleData(trackIndex, outputBuffer, bufferInfo);
+        drainAudio(isMic, bufferInfo, audioEncoder);
+    }
+
+    private void drainAudio(Boolean isMic, MediaCodec.BufferInfo audioBufferInfo, MediaCodec audioEncoder) {
+        ByteBuffer[] audioOutputBuffers;
+        if (isMic) {
+            audioOutputBuffers = micOutputBuffers;
+        } else {
+            audioOutputBuffers = speakerOutputBuffers;
+        }
+        while (true) {
+            int encoderStatus = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
+            if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                break;
+            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
+                // not expected for an encoder
+                audioOutputBuffers = audioEncoder.getOutputBuffers();
+                Log.w(TAG, "encoder output buffers changed");
+            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                // not expected for an encoder
+                MediaFormat newFormat = audioEncoder.getOutputFormat();
+
+                Log.w(TAG, "encoder output format changed: " + newFormat);
+                if (isMic) {
+                    micTrackIndex = mediaMuxer.addTrack(newFormat);
+                    if (micTrackIndex != -1 && !muxerStarted) {
+                        mediaMuxer.start();
+                        muxerStarted = true;
+                    }
+                } else {
+                    speakerTrackIndex = mediaMuxer.addTrack(newFormat);
+                    if (speakerTrackIndex != -1 && !muxerStarted) {
+                        mediaMuxer.start();
+                        muxerStarted = true;
+                    }
+                }
+                if (!muxerStarted)
+                    break;
+            } else if (encoderStatus < 0) {
+                Log.e(TAG, "unexpected result fr om encoder.dequeueOutputBuffer: " + encoderStatus);
+            } else { // encoderStatus >= 0
+                try {
+                    ByteBuffer encodedData = audioOutputBuffers[encoderStatus];
+                    if (encodedData == null) {
+                        Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
+                        break;
+                    }
+                    // It's usually necessary to adjust the ByteBuffer values to match BufferInfo.
+                    encodedData.position(audioBufferInfo.offset);
+                    encodedData.limit(audioBufferInfo.offset + audioBufferInfo.size);
+                    if (muxerStarted) {
+                        int audioTrackIndex;
+                        if (isMic) {
+                            audioTrackIndex = micTrackIndex;
+                        } else {
+                            audioTrackIndex = speakerTrackIndex;
+                        }
+                        mediaMuxer.writeSampleData(audioTrackIndex, encodedData, audioBufferInfo);
+                    }
+                    isRunning = isRunning && (audioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
+                    audioEncoder.releaseOutputBuffer(encoderStatus, false);
+                    if ((audioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break;
+                    }
+                } catch (Exception e) {
+                    Log.wtf(TAG, e);
+                    break;
+                }
             }
-            audioEncoder.releaseOutputBuffer(outputBufferIndex, false);
-            outputBufferIndex = audioEncoder.dequeueOutputBuffer(bufferInfo, 0);
         }
     }
 }
