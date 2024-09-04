@@ -69,8 +69,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             audioThreadHandler = null;
         }
         videoBufferInfo = new MediaCodec.BufferInfo();
-        micBufferInfo = new MediaCodec.BufferInfo();
-        speakerBufferInfo = new MediaCodec.BufferInfo();
         this.sharedContext = sharedContext;
 
         mediaMuxer = new MediaMuxer(outputFile, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
@@ -279,8 +277,14 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         ByteBuffer[] audioOutputBuffers;
         if (isMic) {
             audioOutputBuffers = micOutputBuffers;
+            if(micBufferInfo == null) {
+                micBufferInfo = new MediaCodec.BufferInfo();
+            }
         } else {
             audioOutputBuffers = speakerOutputBuffers;
+            if(speakerBufferInfo == null) {
+                speakerBufferInfo = new MediaCodec.BufferInfo();
+            }
         }
         while (true) {
             int encoderStatus = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
@@ -288,7 +292,11 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 break;
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 // not expected for an encoder
-                audioOutputBuffers = audioEncoder.getOutputBuffers();
+                if (isMic) {
+                    micOutputBuffers = audioEncoder.getOutputBuffers();
+                }else{
+                    speakerOutputBuffers = audioEncoder.getOutputBuffers();
+                }
                 Log.w(TAG, "encoder output buffers changed");
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // not expected for an encoder
