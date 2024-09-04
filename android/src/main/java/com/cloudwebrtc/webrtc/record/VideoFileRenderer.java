@@ -317,6 +317,10 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                     Log.e(TAG, "add speaker Track: " + newFormat);
                     speakerTrackIndex = mediaMuxer.addTrack(newFormat);
                 }
+                if (!muxerStarted) {
+                    mediaMuxer.start();
+                    muxerStarted = true;
+                }
                 if (!muxerStarted)
                     break;
             } else if (encoderStatus < 0) {
