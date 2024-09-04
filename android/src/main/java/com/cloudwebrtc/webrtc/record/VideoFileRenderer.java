@@ -97,32 +97,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         }
     }
 
-    private void initAudioEncoders(int sampleRate, int channelCount) {
-        try {
-            // Initialize mic audio encoder
-            MediaFormat micFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", sampleRate, channelCount);
-            micFormat.setInteger(MediaFormat.KEY_BIT_RATE, 64000);
-            micFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-            micAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
-            micAudioEncoder.configure(micFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            micAudioEncoder.start();
-            micInputBuffers = micAudioEncoder.getInputBuffers();
-            micOutputBuffers = micAudioEncoder.getOutputBuffers();
-
-            // Initialize speaker audio encoder
-            MediaFormat speakerFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", sampleRate, channelCount);
-            speakerFormat.setInteger(MediaFormat.KEY_BIT_RATE, 64000);
-            speakerFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-            speakerAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
-            speakerAudioEncoder.configure(speakerFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            speakerAudioEncoder.start();
-            speakerInputBuffers = speakerAudioEncoder.getInputBuffers();
-            speakerOutputBuffers = speakerAudioEncoder.getOutputBuffers();
-        } catch (IOException exception) {
-            Log.wtf(TAG, exception);
-        }
-    }
-
     @Override
     public void onFrame(VideoFrame frame) {
         frame.retain();
@@ -223,10 +197,39 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         }
     }
 
+    private void initMicAudioEncoder(int channelCount, int sampleRate) {
+        try {
+            micAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
+            MediaFormat format = MediaFormat.createAudioFormat("audio/mp4a-latm", sampleRate, channelCount);
+            format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
+            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+            micAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            micAudioEncoder.start();
+        } catch (IOException exception) {
+            Log.e(TAG, "Error initializing mic audio encoder", exception);
+        }
+    }
+
+    private void initSpeakerAudioEncoder(int channelCount, int sampleRate) {
+        try {
+            speakerAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
+            MediaFormat format = MediaFormat.createAudioFormat("audio/mp4a-latm", sampleRate, channelCount);
+            format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
+            format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+            speakerAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            speakerAudioEncoder.start();
+        } catch (IOException exception) {
+            Log.e(TAG, "Error initializing speaker audio encoder", exception);
+        }
+    }
+
     @Override
     public void onWebRtcAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples samples) {
         if (!isRunning) return;
         audioThreadHandler.post(() -> {
+            if (micAudioEncoder == null) {
+                initMicAudioEncoder(samples.getChannelCount(), samples.getSampleRate());
+            }
             processAudioSamples(true, samples, micAudioEncoder, micBufferInfo, micTrackIndex);
         });
     }
@@ -234,6 +237,9 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     public void onWebRtcOutputAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples samples) {
         if (!isRunning) return;
         audioThreadHandler.post(() -> {
+            if (speakerAudioEncoder == null) {
+                initSpeakerAudioEncoder(samples.getChannelCount(), samples.getSampleRate());
+            }
             processAudioSamples(false, samples, speakerAudioEncoder, speakerBufferInfo, speakerTrackIndex);
         });
     }
