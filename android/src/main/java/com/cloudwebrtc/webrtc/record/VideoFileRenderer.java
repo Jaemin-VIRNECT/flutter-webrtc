@@ -217,6 +217,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
             micAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             micAudioEncoder.start();
+            micInputBuffers = micAudioEncoder.getInputBuffers();
+            micOutputBuffers = micAudioEncoder.getOutputBuffers();
         } catch (IOException exception) {
             Log.e(TAG, "Error initializing mic audio encoder", exception);
         }
@@ -230,6 +232,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
             speakerAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             speakerAudioEncoder.start();
+            speakerInputBuffers = speakerAudioEncoder.getInputBuffers();
+            speakerOutputBuffers = speakerAudioEncoder.getOutputBuffers();
         } catch (IOException exception) {
             Log.e(TAG, "Error initializing speaker audio encoder", exception);
         }
