@@ -49,7 +49,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private boolean isRunning = true;
     private GlRectDrawer drawer;
     private Surface surface;
-    private MediaCodec audioEncoder;
+    private MediaCodec inputAudioEncoder;
+    private MediaCodec outputAudioEncoder;
 
     VideoFileRenderer(String outputFile, final EglBase.Context sharedContext, boolean withAudio) throws IOException {
         renderThread = new HandlerThread(TAG + "RenderThread");
@@ -131,9 +132,13 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         isRunning = false;
         if (audioThreadHandler != null)
             audioThreadHandler.post(() -> {
-                if (audioEncoder != null) {
-                    audioEncoder.stop();
-                    audioEncoder.release();
+                if (inputAudioEncoder != null) {
+                    inputAudioEncoder.stop();
+                    inputAudioEncoder.release();
+                }
+                if (outputAudioEncoder !=null) {
+                    outputAudioEncoder.stop();
+                    outputAudioEncoder.release();
                 }
                 audioThread.quit();
             });
@@ -217,16 +222,16 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         if (audioBufferInfo == null)
             audioBufferInfo = new MediaCodec.BufferInfo();
         while (true) {
-            int encoderStatus = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
+            int encoderStatus = inputAudioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 // not expected for an encoder
-                audioOutputBuffers = audioEncoder.getOutputBuffers();
+                audioOutputBuffers = inputAudioEncoder.getOutputBuffers();
                 Log.w(TAG, "encoder output buffers changed");
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // not expected for an encoder
-                MediaFormat newFormat = audioEncoder.getOutputFormat();
+                MediaFormat newFormat = inputAudioEncoder.getOutputFormat();
 
                 Log.w(TAG, "encoder output format changed: " + newFormat);
                 audioTrackIndex = mediaMuxer.addTrack(newFormat);
@@ -251,7 +256,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                     if (muxerStarted)
                         mediaMuxer.writeSampleData(audioTrackIndex, encodedData, audioBufferInfo);
                     isRunning = isRunning && (audioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
-                    audioEncoder.releaseOutputBuffer(encoderStatus, false);
+                    inputAudioEncoder.releaseOutputBuffer(encoderStatus, false);
                     if ((audioBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         break;
                     }
@@ -265,31 +270,32 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     @Override
     public void onWebRtcAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples audioSamples) {
+//        Log.e("onWebRTCAudioRecordSamplesReady", audioSamples.getChannelCount());
         if (!isRunning)
             return;
         audioThreadHandler.post(() -> {
-            if (audioEncoder == null) try {
-                audioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
+            if (inputAudioEncoder == null) try {
+                inputAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
                 MediaFormat format = new MediaFormat();
                 format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
                 format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, audioSamples.getChannelCount());
                 format.setInteger(MediaFormat.KEY_SAMPLE_RATE, audioSamples.getSampleRate());
                 format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
                 format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-                audioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-                audioEncoder.start();
-                audioInputBuffers = audioEncoder.getInputBuffers();
-                audioOutputBuffers = audioEncoder.getOutputBuffers();
+                inputAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+                inputAudioEncoder.start();
+                audioInputBuffers = inputAudioEncoder.getInputBuffers();
+                audioOutputBuffers = inputAudioEncoder.getOutputBuffers();
             } catch (IOException exception) {
                 Log.wtf(TAG, exception);
             }
-            int bufferIndex = audioEncoder.dequeueInputBuffer(0);
+            int bufferIndex = inputAudioEncoder.dequeueInputBuffer(0);
             if (bufferIndex >= 0) {
                 ByteBuffer buffer = audioInputBuffers[bufferIndex];
                 buffer.clear();
                 byte[] data = audioSamples.getData();
                 buffer.put(data);
-                audioEncoder.queueInputBuffer(bufferIndex, 0, data.length, presTime, 0);
+                inputAudioEncoder.queueInputBuffer(bufferIndex, 0, data.length, presTime, 0);
                 presTime += data.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
             }
             drainAudio();
