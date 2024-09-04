@@ -168,8 +168,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 Log.e(TAG, "encoder output format changed: " + newFormat);
                 Log.e(TAG, "add video track: " + newFormat);
                 videoTrackIndex = mediaMuxer.addTrack(newFormat);
-
-                if (!muxerStarted) {
+                Log.e(TAG, "video drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", micTrackIndex = " + micTrackIndex + "speakerTrackIndex = " + speakerTrackIndex + "muxerStarted = " + muxerStarted);
+                if (videoTrackIndex != -1 && micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
                     Log.e(TAG, "mediaMuxer started in drainVideoEncoder");
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -334,7 +334,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                     Log.e(TAG, "after add speaker Track: " + newFormat);
 
                 }
-                if (!muxerStarted) {
+                Log.e(TAG, "drain Audio drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", micTrackIndex = " + micTrackIndex + "speakerTrackIndex = " + speakerTrackIndex + "muxerStarted = " + muxerStarted);
+                if (videoTrackIndex != -1 && micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
                     Log.e(TAG, "mediaMuxer started in drainAudio");
                     mediaMuxer.start();
                     muxerStarted = true;
