@@ -166,10 +166,9 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat newFormat = videoEncoder.getOutputFormat();
                 Log.e(TAG, "encoder output format changed: " + newFormat);
-                if (muxerStarted) {
-                    Log.e(TAG, "add video track: " + newFormat);
-                    videoTrackIndex = mediaMuxer.addTrack(newFormat);
-                }
+                Log.e(TAG, "add video track: " + newFormat);
+                videoTrackIndex = mediaMuxer.addTrack(newFormat);
+
                 if (!muxerStarted) {
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -284,19 +283,17 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     }
 
     private void drainAudio(Boolean isMic, MediaCodec.BufferInfo audioBufferInfo, MediaCodec audioEncoder) {
-        ByteBuffer[] audioOutputBuffers;
         if (isMic) {
-            audioOutputBuffers = micOutputBuffers;
             if (micBufferInfo == null) {
                 micBufferInfo = new MediaCodec.BufferInfo();
             }
         } else {
-            audioOutputBuffers = speakerOutputBuffers;
             if (speakerBufferInfo == null) {
                 speakerBufferInfo = new MediaCodec.BufferInfo();
             }
         }
         while (true) {
+
             int encoderStatus = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 10000);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
@@ -313,22 +310,27 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 MediaFormat newFormat = audioEncoder.getOutputFormat();
 
                 Log.w(TAG, "encoder output format changed: " + newFormat);
-                if (muxerStarted) {
-                    if (isMic) {
-                        Log.e(TAG, "add mic Track: " + newFormat);
-                        micTrackIndex = mediaMuxer.addTrack(newFormat);
-                    } else {
-                        Log.e(TAG, "add speaker Track: " + newFormat);
-                        speakerTrackIndex = mediaMuxer.addTrack(newFormat);
-                    }
+                if (isMic) {
+                    Log.e(TAG, "add mic Track: " + newFormat);
+                    micTrackIndex = mediaMuxer.addTrack(newFormat);
                 } else {
-                    break;
+                    Log.e(TAG, "add speaker Track: " + newFormat);
+                    speakerTrackIndex = mediaMuxer.addTrack(newFormat);
                 }
+                if (!muxerStarted)
+                    break;
             } else if (encoderStatus < 0) {
                 Log.e(TAG, "unexpected result fr om encoder.dequeueOutputBuffer: " + encoderStatus);
             } else { // encoderStatus >= 0
                 try {
-                    ByteBuffer encodedData = audioOutputBuffers[encoderStatus];
+                    ByteBuffer encodedData;
+                    if (isMic) {
+                        encodedData = micOutputBuffers[encoderStatus];
+
+                    } else {
+                        encodedData = speakerOutputBuffers[encoderStatus];
+
+                    }
                     if (encodedData == null) {
                         Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
                         break;
