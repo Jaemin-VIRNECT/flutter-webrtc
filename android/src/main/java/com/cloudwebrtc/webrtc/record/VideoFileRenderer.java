@@ -57,6 +57,17 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private GlRectDrawer drawer;
     private Surface surface;
 
+    // Add a mixed audio encoder
+    private MediaCodec mixedAudioEncoder;
+    private MediaCodec.BufferInfo mixedBufferInfo;
+    private ByteBuffer[] mixedOutputBuffers;
+    private int audioTrackIndex = -1;
+
+    // Buffers to store incoming audio samples
+    private byte[] micDataBuffer;
+    private byte[] speakerDataBuffer;
+    private final Object audioLock = new Object(); // For synchronization
+
     VideoFileRenderer(String outputFile, final EglBase.Context sharedContext, boolean withAudio) throws IOException {
         renderThread = new HandlerThread(TAG + "RenderThread");
         renderThread.start();
@@ -145,6 +156,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 videoEncoder.stop();
                 videoEncoder.release();
             }
+            muxerStarted = false;
             eglBase.release();
             mediaMuxer.stop();
             mediaMuxer.release();
@@ -216,38 +228,43 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         }
     }
 
+    private void initMixedAudioEncoder(int sampleRate, int channelCount) {
+        MediaFormat format = new MediaFormat();
+        format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
+        format.setInteger(MediaFormat.KEY_SAMPLE_RATE, sampleRate);
+        format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, channelCount);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 128000); // Adjust bitrate as needed
+        format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+
+        try {
+            mixedAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
+            mixedAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+            mixedAudioEncoder.start();
+            mixedOutputBuffers = mixedAudioEncoder.getOutputBuffers();
+            mixedBufferInfo = new MediaCodec.BufferInfo();
+        } catch (IOException e) {
+            Log.wtf(TAG, "Failed to initialize mixedAudioEncoder", e);
+        }
+    }
+
+
     @Override
     public void onWebRtcAudioRecordSamplesReady(JavaAudioDeviceModule.AudioSamples samples) {
         if (!isRunning) {
-            Log.e(TAG, "onWebRtcAudioRecordSamples !isRunning");
+            Log.e(TAG, "onWebRtcAudioRecordSamplesReady !isRunning");
             return;
         }
         inputAudioThreadHandler.post(() -> {
-            if (micAudioEncoder == null) try {
-                micAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
-                MediaFormat format = new MediaFormat();
-                format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
-                format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, samples.getChannelCount());
-                format.setInteger(MediaFormat.KEY_SAMPLE_RATE, samples.getSampleRate());
-                format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
-                format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-                micAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-                micAudioEncoder.start();
-                micInputBuffers = micAudioEncoder.getInputBuffers();
-                micOutputBuffers = micAudioEncoder.getOutputBuffers();
-            } catch (IOException exception) {
-                Log.wtf(TAG, exception);
+            synchronized (audioLock) {
+                // Initialize encoder if not yet
+                if (mixedAudioEncoder == null) {
+                    initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
+                }
+                // Store mic samples
+                micDataBuffer = samples.getData();
+                // Attempt to mix
+                attemptMixAndEncode();
             }
-            int bufferIndex = micAudioEncoder.dequeueInputBuffer(0);
-            if (bufferIndex >= 0) {
-                ByteBuffer buffer = micInputBuffers[bufferIndex];
-                buffer.clear();
-                byte[] data = samples.getData();
-                buffer.put(data);
-                micAudioEncoder.queueInputBuffer(bufferIndex, 0, data.length, micPresTime, 0);
-                micPresTime += data.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
-            }
-            drainMicAudio(samples);
         });
     }
 
@@ -257,92 +274,112 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             return;
         }
         outputAudioThreadHandler.post(() -> {
-            if (speakerAudioEncoder == null) try {
-                speakerAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
-                MediaFormat format = new MediaFormat();
-                format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
-                format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, samples.getChannelCount());
-                format.setInteger(MediaFormat.KEY_SAMPLE_RATE, samples.getSampleRate());
-                format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
-                format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-                speakerAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-                speakerAudioEncoder.start();
-                speakerInputBuffers = speakerAudioEncoder.getInputBuffers();
-                speakerOutputBuffers = speakerAudioEncoder.getOutputBuffers();
-            } catch (IOException exception) {
-                Log.wtf(TAG, exception);
+            synchronized (audioLock) {
+                // Initialize encoder if not yet
+                if (mixedAudioEncoder == null) {
+                    initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
+                }
+                // Store speaker samples
+                speakerDataBuffer = samples.getData();
+                // Attempt to mix
+                attemptMixAndEncode();
             }
-            int bufferIndex = speakerAudioEncoder.dequeueInputBuffer(0);
-            if (bufferIndex >= 0) {
-                ByteBuffer buffer = speakerInputBuffers[bufferIndex];
-                buffer.clear();
-                byte[] data = samples.getData();
-                buffer.put(data);
-                speakerAudioEncoder.queueInputBuffer(bufferIndex, 0, data.length, speakerPresTime, 0);
-                speakerPresTime += data.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
-            }
-            drainSpeakerAudio(samples);
         });
     }
 
-    private long micPresTime = 0L;
-    private long speakerPresTime = 0L;
+    private byte[] mixAudioBuffers(byte[] micData, byte[] speakerData, int bufferSize) {
+        byte[] mixedData = new byte[bufferSize];
 
-    private void drainMicAudio(JavaAudioDeviceModule.AudioSamples samples) {
-        if (micBufferInfo == null) {
-            micBufferInfo = new MediaCodec.BufferInfo();
+        for (int i = 0; i < bufferSize; i++) {
+            byte micSample = i < micData.length ? micData[i] : 0;
+            byte speakerSample = i < speakerData.length ? speakerData[i] : 0;
+
+            int mixedSample = micSample + speakerSample;
+
+            // 클리핑 방지
+            if (mixedSample > Byte.MAX_VALUE) {
+                mixedSample = Byte.MAX_VALUE;
+            } else if (mixedSample < Byte.MIN_VALUE) {
+                mixedSample = Byte.MIN_VALUE;
+            }
+
+            mixedData[i] = (byte) mixedSample;
         }
+
+        return mixedData;
+    }
+
+    private void attemptMixAndEncode() {
+        if (micDataBuffer == null || speakerDataBuffer == null) {
+            // Wait until both buffers are available
+            return;
+        }
+        int bufferSize = Math.max(micDataBuffer.length, speakerDataBuffer.length);
+
+        // Mix the audio samples
+        byte[] mixedData = mixAudioBuffers(micDataBuffer, speakerDataBuffer, bufferSize);
+        micDataBuffer = null;
+        speakerDataBuffer = null;
+
+        // Feed mixed data to encoder
+        int bufferIndex = mixedAudioEncoder.dequeueInputBuffer(10000);
+        if (bufferIndex >= 0) {
+            ByteBuffer inputBuffer = mixedAudioEncoder.getInputBuffer(bufferIndex);
+            if (inputBuffer != null) {
+                inputBuffer.clear();
+                inputBuffer.put(mixedData);
+                long presentationTimeUs = System.nanoTime() / 1000; // Adjust as needed
+                mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presentationTimeUs, 0);
+            }
+        }
+
+        // Drain the encoder
+        drainMixedAudioEncoder();
+    }
+
+
+    private void drainMixedAudioEncoder() {
         while (true) {
-            int encoderStatus = micAudioEncoder.dequeueOutputBuffer(micBufferInfo, 10000);
+            int encoderStatus = mixedAudioEncoder.dequeueOutputBuffer(mixedBufferInfo, 10000);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                // not expected for an encoder
-                micOutputBuffers = micAudioEncoder.getOutputBuffers();
-                Log.e(TAG, "encoder output buffers changed");
+                mixedOutputBuffers = mixedAudioEncoder.getOutputBuffers();
+                Log.e(TAG, "mixedAudioEncoder output buffers changed");
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                // not expected for an encoder
-                MediaFormat newFormat = micAudioEncoder.getOutputFormat();
-                Log.e(TAG, "encoder output format changed: " + newFormat);
-                Log.e(TAG, "before add mic Track: " + newFormat);
-                micTrackIndex = mediaMuxer.addTrack(newFormat);
-                Log.e(TAG, "after add mic Track: " + newFormat);
-                Log.e(TAG, "drain Audio drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", micTrackIndex = " + micTrackIndex + "speakerTrackIndex = " + speakerTrackIndex + "muxerStarted = " + muxerStarted);
-                if (videoTrackIndex != -1 && micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
-                    Log.e(TAG, "mediaMuxer started in drainAudio");
+                if (muxerStarted) {
+                    throw new RuntimeException("Format changed twice");
+                }
+                MediaFormat newFormat = mixedAudioEncoder.getOutputFormat();
+                audioTrackIndex = mediaMuxer.addTrack(newFormat);
+                Log.e(TAG, "Added audio track: " + audioTrackIndex);
+                if (videoTrackIndex != -1 && audioTrackIndex != -1 && !muxerStarted) {
                     mediaMuxer.start();
                     muxerStarted = true;
+                    Log.e(TAG, "MediaMuxer started in drainMixedAudioEncoder");
                 }
-                Log.e(TAG, "mediaMuxer: " + muxerStarted);
-                if (!muxerStarted)
-                    break;
             } else if (encoderStatus < 0) {
-                Log.e(TAG, "unexpected result fr om encoder.dequeueOutputBuffer: " + encoderStatus);
+                Log.e(TAG, "Unexpected result from encoder.dequeueOutputBuffer: " + encoderStatus);
             } else { // encoderStatus >= 0
-                try {
-                    ByteBuffer encodedData = micOutputBuffers[encoderStatus];
-                    if (encodedData == null) {
-                        Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
-                        break;
-                    }
-                    // It's usually necessary to adjust the ByteBuffer values to match BufferInfo.
-                    encodedData.position(micBufferInfo.offset);
-                    encodedData.limit(micBufferInfo.offset + micBufferInfo.size);
-                    if (muxerStarted) {
-                        mediaMuxer.writeSampleData(micTrackIndex, encodedData, micBufferInfo);
-                    }
-                    isRunning = isRunning && (micBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
-                    micAudioEncoder.releaseOutputBuffer(encoderStatus, false);
-                    if ((micBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break;
-                    }
-                } catch (Exception e) {
-                    Log.wtf(TAG, e);
+                ByteBuffer encodedData = mixedOutputBuffers[encoderStatus];
+                if (encodedData == null) {
+                    Log.e(TAG, "mixed encoderOutputBuffer " + encoderStatus + " was null");
+                    break;
+                }
+                encodedData.position(mixedBufferInfo.offset);
+                encodedData.limit(mixedBufferInfo.offset + mixedBufferInfo.size);
+                if (mixedBufferInfo.size > 0 && muxerStarted) {
+                    mediaMuxer.writeSampleData(audioTrackIndex, encodedData, mixedBufferInfo);
+                }
+                mixedAudioEncoder.releaseOutputBuffer(encoderStatus, false);
+                if ((mixedBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     break;
                 }
             }
         }
     }
+
+
 
     private void drainSpeakerAudio(JavaAudioDeviceModule.AudioSamples samples) {
         if (speakerBufferInfo == null) {
