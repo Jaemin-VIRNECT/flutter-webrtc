@@ -51,8 +51,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private MediaCodec.BufferInfo micBufferInfo;
     private MediaCodec.BufferInfo speakerBufferInfo;
     private int videoTrackIndex = -1;
-    private int micTrackIndex = -1;
-    private int speakerTrackIndex = -1;
     private boolean isRunning = true;
     private GlRectDrawer drawer;
     private Surface surface;
@@ -187,8 +185,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 Log.e(TAG, "encoder output format changed: " + newFormat);
                 Log.e(TAG, "add video track: " + newFormat);
                 videoTrackIndex = mediaMuxer.addTrack(newFormat);
-                Log.e(TAG, "video drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", micTrackIndex = " + micTrackIndex + "speakerTrackIndex = " + speakerTrackIndex + "muxerStarted = " + muxerStarted);
-                if (videoTrackIndex != -1 && micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
+                Log.e(TAG, "video drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", audioTrackIndex = " + audioTrackIndex + "muxerStarted = " + muxerStarted);
+                if (videoTrackIndex != -1 && audioTrackIndex != -1 && !muxerStarted) {
                     Log.e(TAG, "mediaMuxer started in drainVideoEncoder");
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -352,7 +350,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 }
                 MediaFormat newFormat = mixedAudioEncoder.getOutputFormat();
                 audioTrackIndex = mediaMuxer.addTrack(newFormat);
-                Log.e(TAG, "Added audio track: " + audioTrackIndex);
+                Log.e(TAG, "Added audio track: " + audioTrackIndex + "videoTrackIndex = " + videoTrackIndex + "muxerStarted = " + muxerStarted);
                 if (videoTrackIndex != -1 && audioTrackIndex != -1 && !muxerStarted) {
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -380,61 +378,4 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     }
 
 
-
-    private void drainSpeakerAudio(JavaAudioDeviceModule.AudioSamples samples) {
-        if (speakerBufferInfo == null) {
-            speakerBufferInfo = new MediaCodec.BufferInfo();
-        }
-        while (true) {
-            int encoderStatus = speakerAudioEncoder.dequeueOutputBuffer(speakerBufferInfo, 10000);
-            if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                break;
-            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                // not expected for an encoder
-                speakerOutputBuffers = speakerAudioEncoder.getOutputBuffers();
-                Log.e(TAG, "encoder output buffers changed");
-            } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                // not expected for an encoder
-                MediaFormat newFormat = speakerAudioEncoder.getOutputFormat();
-                Log.e(TAG, "encoder output format changed: " + newFormat);
-                Log.e(TAG, "before add speaker Track: " + newFormat);
-                speakerTrackIndex = mediaMuxer.addTrack(newFormat);
-                Log.e(TAG, "after add speaker Track: " + newFormat);
-                Log.e(TAG, "drain Audio drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", micTrackIndex = " + micTrackIndex + "speakerTrackIndex = " + speakerTrackIndex + "muxerStarted = " + muxerStarted);
-                if (videoTrackIndex != -1 && micTrackIndex != -1 && speakerTrackIndex != -1 && !muxerStarted) {
-                    Log.e(TAG, "mediaMuxer started in drainAudio");
-                    mediaMuxer.start();
-                    muxerStarted = true;
-                }
-                Log.e(TAG, "mediaMuxer: " + muxerStarted);
-                if (!muxerStarted)
-                    break;
-            } else if (encoderStatus < 0) {
-                Log.e(TAG, "unexpected result fr om encoder.dequeueOutputBuffer: " + encoderStatus);
-            } else { // encoderStatus >= 0
-                try {
-                    ByteBuffer encodedData = speakerOutputBuffers[encoderStatus];
-
-                    if (encodedData == null) {
-                        Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
-                        break;
-                    }
-                    // It's usually necessary to adjust the ByteBuffer values to match BufferInfo.
-                    encodedData.position(speakerBufferInfo.offset);
-                    encodedData.limit(speakerBufferInfo.offset + speakerBufferInfo.size);
-                    if (muxerStarted) {
-                        mediaMuxer.writeSampleData(speakerTrackIndex, encodedData, speakerBufferInfo);
-                    }
-                    isRunning = isRunning && (speakerBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
-                    speakerAudioEncoder.releaseOutputBuffer(encoderStatus, false);
-                    if ((speakerBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break;
-                    }
-                } catch (Exception e) {
-                    Log.wtf(TAG, e);
-                    break;
-                }
-            }
-        }
-    }
 }
