@@ -19,6 +19,7 @@ import org.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private static final String TAG = "VideoFileRenderer";
@@ -30,11 +31,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private final Handler outputAudioThreadHandler;
     private int outputFileWidth = -1;
     private int outputFileHeight = -1;
-    private ByteBuffer[] videoOutputBuffers;
-    private ByteBuffer[] micInputBuffers;
-    private ByteBuffer[] micOutputBuffers;
-    private ByteBuffer[] speakerInputBuffers;
-    private ByteBuffer[] speakerOutputBuffers;
     private EglBase eglBase;
     private final EglBase.Context sharedContext;
     private VideoFrameDrawer frameDrawer;
@@ -45,11 +41,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     private final MediaMuxer mediaMuxer;
     private MediaCodec videoEncoder;
-    private MediaCodec micAudioEncoder;
-    private MediaCodec speakerAudioEncoder;
     private final MediaCodec.BufferInfo videoBufferInfo;
-    private MediaCodec.BufferInfo micBufferInfo;
-    private MediaCodec.BufferInfo speakerBufferInfo;
     private int videoTrackIndex = -1;
     private boolean isRunning = true;
     private GlRectDrawer drawer;
@@ -58,7 +50,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     // Add a mixed audio encoder
     private MediaCodec mixedAudioEncoder;
     private MediaCodec.BufferInfo mixedBufferInfo;
-    private ByteBuffer[] mixedOutputBuffers;
     private int audioTrackIndex = -1;
 
     // Buffers to store incoming audio samples
@@ -87,6 +78,8 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         this.sharedContext = sharedContext;
 
         mediaMuxer = new MediaMuxer(outputFile, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+
+        audioTrackIndex = withAudio ? -1 : 0;
     }
 
     private void initVideoEncoder() {
@@ -135,18 +128,14 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         isRunning = false;
         if (inputAudioThreadHandler != null)
             inputAudioThreadHandler.post(() -> {
-                if (micAudioEncoder != null) {
-                    micAudioEncoder.stop();
-                    micAudioEncoder.release();
+                if (mixedAudioEncoder != null) {
+                    mixedAudioEncoder.stop();
+                    mixedAudioEncoder.release();
                 }
                 inputAudioThread.quit();
             });
         if (outputAudioThreadHandler != null)
             outputAudioThreadHandler.post(() -> {
-                if (speakerAudioEncoder != null) {
-                    speakerAudioEncoder.stop();
-                    speakerAudioEncoder.release();
-                }
                 outputAudioThread.quit();
             });
         renderThreadHandler.post(() -> {
@@ -169,7 +158,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private void drainVideoEncoder() {
         if (!videoEncoderStarted) {
             videoEncoder.start();
-            videoOutputBuffers = videoEncoder.getOutputBuffers();
             videoEncoderStarted = true;
             return;
         }
@@ -178,7 +166,6 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                videoOutputBuffers = videoEncoder.getOutputBuffers();
                 Log.e(TAG, "encoder output buffers changed");
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat newFormat = videoEncoder.getOutputFormat();
@@ -186,7 +173,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 Log.e(TAG, "add video track: " + newFormat);
                 videoTrackIndex = mediaMuxer.addTrack(newFormat);
                 Log.e(TAG, "video drain mediaMuxer start? videoTrackIndex = " + videoTrackIndex + ", audioTrackIndex = " + audioTrackIndex + "muxerStarted = " + muxerStarted);
-                if (videoTrackIndex != -1 && audioTrackIndex != -1 && !muxerStarted) {
+                if (audioTrackIndex != -1 && !muxerStarted) {
                     Log.e(TAG, "mediaMuxer started in drainVideoEncoder");
                     mediaMuxer.start();
                     muxerStarted = true;
@@ -195,12 +182,11 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
                 if (!muxerStarted)
                     break;
-
             } else if (encoderStatus < 0) {
                 Log.e(TAG, "unexpected result from encoder.dequeueOutputBuffer: " + encoderStatus);
             } else { // encoderStatus >= 0
                 try {
-                    ByteBuffer encodedData = videoOutputBuffers[encoderStatus];
+                    ByteBuffer encodedData = videoEncoder.getOutputBuffer(encoderStatus);
                     if (encodedData == null) {
                         Log.e(TAG, "encoderOutputBuffer " + encoderStatus + " was null");
                         break;
@@ -214,6 +200,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                     if (muxerStarted) {
                         mediaMuxer.writeSampleData(videoTrackIndex, encodedData, videoBufferInfo);
                     }
+                    isRunning = isRunning && (videoBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
                     videoEncoder.releaseOutputBuffer(encoderStatus, false);
                     if ((videoBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         break;
@@ -231,14 +218,13 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
         format.setInteger(MediaFormat.KEY_SAMPLE_RATE, sampleRate);
         format.setInteger(MediaFormat.KEY_CHANNEL_COUNT, channelCount);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 128000); // Adjust bitrate as needed
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 64 * 1024);
         format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
 
         try {
             mixedAudioEncoder = MediaCodec.createEncoderByType("audio/mp4a-latm");
             mixedAudioEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             mixedAudioEncoder.start();
-            mixedOutputBuffers = mixedAudioEncoder.getOutputBuffers();
             mixedBufferInfo = new MediaCodec.BufferInfo();
         } catch (IOException e) {
             Log.wtf(TAG, "Failed to initialize mixedAudioEncoder", e);
@@ -307,7 +293,12 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         return mixedData;
     }
 
+    long presTime = 0;
+
     private void attemptMixAndEncode() {
+        // micDataBuffer 에 데이터를 저장하는 부분도 로그로 출력
+        Log.d(TAG, "Mic Data Buffer: " + Arrays.toString(micDataBuffer));
+        Log.d(TAG, "Speacker Data Buffer: " + Arrays.toString(speakerDataBuffer));
         if (micDataBuffer == null || speakerDataBuffer == null) {
             // Wait until both buffers are available
             return;
@@ -320,21 +311,19 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         speakerDataBuffer = null;
 
         // Feed mixed data to encoder
-        int bufferIndex = mixedAudioEncoder.dequeueInputBuffer(10000);
+        int bufferIndex = mixedAudioEncoder.dequeueInputBuffer(0);
         if (bufferIndex >= 0) {
             ByteBuffer inputBuffer = mixedAudioEncoder.getInputBuffer(bufferIndex);
             if (inputBuffer != null) {
                 inputBuffer.clear();
                 inputBuffer.put(mixedData);
-                long presentationTimeUs = System.nanoTime() / 1000; // Adjust as needed
-                mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presentationTimeUs, 0);
+                mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presTime, 0);
+                presTime += mixedData.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
             }
         }
-
         // Drain the encoder
         drainMixedAudioEncoder();
     }
-
 
     private void drainMixedAudioEncoder() {
         while (true) {
@@ -342,40 +331,42 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break;
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
-                mixedOutputBuffers = mixedAudioEncoder.getOutputBuffers();
                 Log.e(TAG, "mixedAudioEncoder output buffers changed");
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (muxerStarted) {
-                    throw new RuntimeException("Format changed twice");
-                }
                 MediaFormat newFormat = mixedAudioEncoder.getOutputFormat();
                 audioTrackIndex = mediaMuxer.addTrack(newFormat);
                 Log.e(TAG, "Added audio track: " + audioTrackIndex + "videoTrackIndex = " + videoTrackIndex + "muxerStarted = " + muxerStarted);
-                if (videoTrackIndex != -1 && audioTrackIndex != -1 && !muxerStarted) {
+                if (videoTrackIndex != -1 && !muxerStarted) {
                     mediaMuxer.start();
                     muxerStarted = true;
                     Log.e(TAG, "MediaMuxer started in drainMixedAudioEncoder");
                 }
+                if (!muxerStarted)
+                    break;
             } else if (encoderStatus < 0) {
                 Log.e(TAG, "Unexpected result from encoder.dequeueOutputBuffer: " + encoderStatus);
             } else { // encoderStatus >= 0
-                ByteBuffer encodedData = mixedOutputBuffers[encoderStatus];
-                if (encodedData == null) {
-                    Log.e(TAG, "mixed encoderOutputBuffer " + encoderStatus + " was null");
-                    break;
-                }
-                encodedData.position(mixedBufferInfo.offset);
-                encodedData.limit(mixedBufferInfo.offset + mixedBufferInfo.size);
-                if (mixedBufferInfo.size > 0 && muxerStarted) {
-                    mediaMuxer.writeSampleData(audioTrackIndex, encodedData, mixedBufferInfo);
-                }
-                mixedAudioEncoder.releaseOutputBuffer(encoderStatus, false);
-                if ((mixedBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                try {
+                    ByteBuffer encodedData = mixedAudioEncoder.getOutputBuffer(encoderStatus);
+                    if (encodedData == null) {
+                        Log.e(TAG, "mixed encoderOutputBuffer " + encoderStatus + " was null");
+                        break;
+                    }
+                    encodedData.position(mixedBufferInfo.offset);
+                    encodedData.limit(mixedBufferInfo.offset + mixedBufferInfo.size);
+                    if (muxerStarted) {
+                        mediaMuxer.writeSampleData(audioTrackIndex, encodedData, mixedBufferInfo);
+                    }
+                    isRunning = isRunning && (mixedBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
+                    mixedAudioEncoder.releaseOutputBuffer(encoderStatus, false);
+                    if ((mixedBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break;
+                    }
+                } catch (Exception e) {
+                    Log.wtf(TAG, e);
                     break;
                 }
             }
         }
     }
-
-
 }
