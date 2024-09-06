@@ -117,6 +117,8 @@ class GetUserMediaImpl {
     private AudioDeviceInfo preferredInput = null;
     private boolean isTorchOn;
     private Intent mediaProjectionData = null;
+    Rect desiredRegion;
+    double desiredZoom = 1.0;
 
     public void screenRequestPermissions(ResultReceiver resultReceiver) {
         mediaProjectionData = null;
@@ -272,6 +274,8 @@ class GetUserMediaImpl {
     private Map<String, VideoCapturer> createVideoCapturer(
             CameraEnumerator enumerator, boolean isFacing, String sourceId) {
         VideoCapturer videoCapturer = null;
+        desiredRegion = null;
+        desiredZoom = 1.0;
         Map<String, VideoCapturer> result = new HashMap<String, VideoCapturer>();
         // if sourceId given, use specified sourceId first
         final String[] deviceNames = enumerator.getDeviceNames();
@@ -1075,6 +1079,7 @@ class GetUserMediaImpl {
                         (Handler) getPrivateProperty(session.getClass(), session, "cameraThreadHandler");
             } catch (NoSuchFieldWithNameException e) {
                 // Most likely the upstream Camera2Capturer class have changed
+                desiredRegion = null;
                 resultError("setZoom", "[ZOOM] Failed to get `" + e.fieldName + "` from `" + e.className + "`", result);
                 return;
             }
@@ -1089,12 +1094,12 @@ class GetUserMediaImpl {
 
                 final double desiredZoomLevel = Math.max(1.0, Math.min(zoomLevel, maxZoomLevel));
 
-                float ratio = 1.0f / (float)desiredZoomLevel;
+                float ratio = 1.0f / (float) desiredZoomLevel;
 
                 if (rect != null) {
                     int croppedWidth = rect.width() - Math.round((float) rect.width() * ratio);
                     int croppedHeight = rect.height() - Math.round((float) rect.height() * ratio);
-                    final Rect desiredRegion = new Rect(croppedWidth / 2, croppedHeight / 2, rect.width() - croppedWidth / 2, rect.height() - croppedHeight / 2);
+                    desiredRegion = new Rect(croppedWidth / 2, croppedHeight / 2, rect.width() - croppedWidth / 2, rect.height() - croppedHeight / 2);
                     captureRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, desiredRegion);
                 }
 
@@ -1114,6 +1119,7 @@ class GetUserMediaImpl {
                         captureRequestBuilder.build(), null, cameraThreadHandler);
             } catch (CameraAccessException e) {
                 // Should never happen since we are already accessing the camera
+                desiredRegion = null;
                 throw new RuntimeException(e);
             }
 
@@ -1131,6 +1137,7 @@ class GetUserMediaImpl {
                 camera = (Camera) getPrivateProperty(session.getClass(), session, "camera");
             } catch (NoSuchFieldWithNameException e) {
                 // Most likely the upstream Camera1Capturer class have changed
+                desiredZoom = 1.0;
                 resultError("setZoom", "[ZOOM] Failed to get `" + e.fieldName + "` from `" + e.className + "`", result);
                 return;
             }
@@ -1138,14 +1145,15 @@ class GetUserMediaImpl {
             Camera.Parameters params = camera.getParameters();
             params.setFlashMode(
                     isTorchOn ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF);
-            if(params.isZoomSupported()) {
+            if (params.isZoomSupported()) {
                 int maxZoom = params.getMaxZoom();
-                double desiredZoom = Math.max(0, Math.min(zoomLevel, maxZoom));
-                params.setZoom((int)desiredZoom);
+                desiredZoom = Math.max(0, Math.min(zoomLevel, maxZoom));
+                params.setZoom((int) desiredZoom);
                 result.success(null);
                 return;
             }
         }
+        desiredZoom = 1.0;
         resultError("setZoom", "[ZOOM] Video capturer not compatible", result);
     }
 
@@ -1192,6 +1200,9 @@ class GetUserMediaImpl {
             try {
                 final CaptureRequest.Builder captureRequestBuilder =
                         cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                if (desiredRegion != null) {
+                    captureRequestBuilder.set(CaptureRequest.SCALER_CROP_REGION, desiredRegion);
+                }
                 captureRequestBuilder.set(
                         CaptureRequest.FLASH_MODE,
                         torch ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
@@ -1230,6 +1241,7 @@ class GetUserMediaImpl {
             }
 
             Camera.Parameters params = camera.getParameters();
+            params.setZoom((int) desiredZoom);
             params.setFlashMode(
                     torch ? Camera.Parameters.FLASH_MODE_TORCH : Camera.Parameters.FLASH_MODE_OFF);
             camera.setParameters(params);
@@ -1322,7 +1334,7 @@ class GetUserMediaImpl {
         if (devices.length > 0) {
             for (int i = 0; i < devices.length; i++) {
                 AudioDeviceInfo device = devices[i];
-                if(deviceId.equals(AudioUtils.getAudioDeviceId(device))) {
+                if (deviceId.equals(AudioUtils.getAudioDeviceId(device))) {
                     preferredInput = device;
                     audioDeviceModule.setPreferredInputDevice(preferredInput);
                     return;
