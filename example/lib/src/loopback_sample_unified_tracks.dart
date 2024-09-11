@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:core';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +34,9 @@ class _MyAppState extends State<LoopBackSampleUnifiedTracks> {
   RTCRtpSender? _audioSender;
   final _localRenderer = RTCVideoRenderer();
   final _remoteRenderer = RTCVideoRenderer();
+  MediaRecorder? _mediaRecorder;
+
+  bool get _isRec => _mediaRecorder != null;
   bool _inCalling = false;
   bool _micOn = false;
   bool _cameraOn = false;
@@ -97,6 +101,40 @@ class _MyAppState extends State<LoopBackSampleUnifiedTracks> {
     119,
     253
   ]);
+
+  void _startRecording() async {
+    if (_localStream == null) throw Exception('Stream is not initialized');
+    if (Platform.isIOS) {
+      print('Recording is not available on iOS');
+      return;
+    }
+    // TODO(rostopira): request write storage permission
+    // final storagePath = await getExternalStorageDirectory();
+    // if (storagePath == null) throw Exception('Can\'t find storagePath');
+    //
+    // final filePath = storagePath.path + '/webrtc_sample/test.mp4';
+    _mediaRecorder = MediaRecorder();
+    setState(() {});
+    final storagePath = Directory("/storage/emulated/0/Download");
+
+    final filePath = storagePath.path + '/test.mp4';
+
+    final videoTrack = _localStream!
+        .getVideoTracks()
+        .firstWhere((track) => track.kind == 'video');
+    await _mediaRecorder!.start(
+      audioChannel: RecorderAudioChannel.OUTPUT,
+      filePath,
+      videoTrack: videoTrack,
+    );
+  }
+
+  void _stopRecording() async {
+    final path = await _mediaRecorder?.stop();
+    setState(() {
+      _mediaRecorder = null;
+    });
+  }
 
   @override
   void initState() {
@@ -798,7 +836,7 @@ class _MyAppState extends State<LoopBackSampleUnifiedTracks> {
         actions: [
           IconButton(
             icon: Icon(Icons.keyboard),
-            onPressed: _sendDtmf,
+            onPressed: _isRec?_stopRecording:_startRecording,
           ),
           PopupMenuButton<String>(
             onSelected: _selectAudioInput,

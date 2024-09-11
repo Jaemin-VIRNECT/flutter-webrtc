@@ -19,16 +19,13 @@ import org.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 
 class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
     private static final String TAG = "VideoFileRenderer";
     private final HandlerThread renderThread;
     private final Handler renderThreadHandler;
-    private final HandlerThread inputAudioThread;
-    private final HandlerThread outputAudioThread;
-    private final Handler inputAudioThreadHandler;
-    private final Handler outputAudioThreadHandler;
+    private final HandlerThread audioThread;
+    private final Handler audioThreadHandler;
     private int outputFileWidth = -1;
     private int outputFileHeight = -1;
     private EglBase eglBase;
@@ -62,17 +59,12 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         renderThread.start();
         renderThreadHandler = new Handler(renderThread.getLooper());
         if (withAudio) {
-            inputAudioThread = new HandlerThread(TAG + "AudioThread");
-            inputAudioThread.start();
-            inputAudioThreadHandler = new Handler(inputAudioThread.getLooper());
-            outputAudioThread = new HandlerThread(TAG + "AudioThread");
-            outputAudioThread.start();
-            outputAudioThreadHandler = new Handler(inputAudioThread.getLooper());
+            audioThread = new HandlerThread(TAG + "AudioThread");
+            audioThread.start();
+            audioThreadHandler = new Handler(audioThread.getLooper());
         } else {
-            inputAudioThread = null;
-            outputAudioThread = null;
-            inputAudioThreadHandler = null;
-            outputAudioThreadHandler = null;
+            audioThread = null;
+            audioThreadHandler = null;
         }
         videoBufferInfo = new MediaCodec.BufferInfo();
         this.sharedContext = sharedContext;
@@ -126,17 +118,13 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
 
     void release() {
         isRunning = false;
-        if (inputAudioThreadHandler != null)
-            inputAudioThreadHandler.post(() -> {
+        if (audioThreadHandler != null)
+            audioThreadHandler.post(() -> {
                 if (mixedAudioEncoder != null) {
                     mixedAudioEncoder.stop();
                     mixedAudioEncoder.release();
                 }
-                inputAudioThread.quit();
-            });
-        if (outputAudioThreadHandler != null)
-            outputAudioThreadHandler.post(() -> {
-                outputAudioThread.quit();
+                audioThread.quit();
             });
         renderThreadHandler.post(() -> {
             if (videoEncoder != null) {
@@ -238,17 +226,16 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             Log.e(TAG, "onWebRtcAudioRecordSamplesReady !isRunning");
             return;
         }
-        inputAudioThreadHandler.post(() -> {
-            synchronized (audioLock) {
-                // Initialize encoder if not yet
-                if (mixedAudioEncoder == null) {
-                    initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
-                }
-                // Store mic samples
-                micDataBuffer = samples.getData();
-                // Attempt to mix
-                attemptMixAndEncode();
+        audioThreadHandler.post(() -> {
+            // Initialize encoder if not yet
+            if (mixedAudioEncoder == null) {
+                initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
             }
+            // Store mic samples
+            micDataBuffer = samples.getData();
+            // Attempt to mix
+            attemptMixAndEncode();
+
         });
     }
 
@@ -257,56 +244,94 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             Log.e(TAG, "onWebRtcOutputAudioRecordSamplesReady !isRunning");
             return;
         }
-        outputAudioThreadHandler.post(() -> {
-            synchronized (audioLock) {
-                // Initialize encoder if not yet
-                if (mixedAudioEncoder == null) {
-                    initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
-                }
-                // Store speaker samples
-                speakerDataBuffer = samples.getData();
-                // Attempt to mix
-                attemptMixAndEncode();
+        audioThreadHandler.post(() -> {
+            // Initialize encoder if not yet
+            if (mixedAudioEncoder == null) {
+                initMixedAudioEncoder(samples.getSampleRate(), samples.getChannelCount());
             }
+            // Store speaker samples
+            speakerDataBuffer = samples.getData();
+            // Attempt to mix
+            attemptMixAndEncode();
         });
     }
 
-    private byte[] mixAudioBuffers(byte[] micData, byte[] speakerData, int bufferSize) {
-        byte[] mixedData = new byte[bufferSize];
 
-        for (int i = 0; i < bufferSize; i++) {
-            byte micSample = i < micData.length ? micData[i] : 0;
-            byte speakerSample = i < speakerData.length ? speakerData[i] : 0;
+    public byte[] mixAudioBuffers(short[] firstAudio, short[] secondAudio) {
+        int firstAudioLen = firstAudio.length;
+        int secondAudioLen = secondAudio.length;
+        int size = Math.max(firstAudioLen, secondAudioLen); // 두 오디오 중 긴 길이에 맞춤
 
-            int mixedSample = micSample + speakerSample;
+        if (size <= 0) return new byte[0];
 
-            // 클리핑 방지
-            if (mixedSample > Byte.MAX_VALUE) {
-                mixedSample = Byte.MAX_VALUE;
-            } else if (mixedSample < Byte.MIN_VALUE) {
-                mixedSample = Byte.MIN_VALUE;
+        byte[] result = new byte[size * 2]; // 최종 결과 버퍼 (byte 배열)
+
+        for (int i = 0; i < size; i++) {
+            int sample1 = 0, sample2 = 0;
+
+            if (i < firstAudioLen) {
+                sample1 = firstAudio[i]; // 첫 번째 오디오 샘플
             }
 
-            mixedData[i] = (byte) mixedSample;
+            if (i < secondAudioLen) {
+                sample2 = secondAudio[i]; // 두 번째 오디오 샘플
+            }
+
+            // 두 샘플을 평균하여 동시에 재생되도록 믹스
+            int mixedSample = (sample1 + sample2) / 2;
+
+            // 클리핑 방지
+            mixedSample = Math.min(Math.max(mixedSample, Short.MIN_VALUE), Short.MAX_VALUE);
+
+            // ByteArray에 Short 값을 저장 (리틀 엔디안 방식)
+            int byteIndex = i * 2;
+            result[byteIndex] = (byte) (mixedSample & 0xff);           // 하위 바이트
+            result[byteIndex + 1] = (byte) ((mixedSample >> 8) & 0xff); // 상위 바이트
         }
 
-        return mixedData;
+        return result;
     }
+
 
     long presTime = 0;
 
+    public short[] byteArrayToShortArray(byte[] byteArray) {
+        // byte 배열의 길이가 짝수가 아닐 경우 처리
+        int shortArrayLength = byteArray.length / 2;
+        short[] shortArray = new short[shortArrayLength];
+
+        // byte 2개를 합쳐서 short로 변환
+        for (int i = 0; i < shortArrayLength; i++) {
+            int byteIndex = i * 2;
+
+            // 리틀 엔디안 방식으로 변환 (하위 바이트 먼저)
+            shortArray[i] = (short) ((byteArray[byteIndex + 1] << 8) | (byteArray[byteIndex] & 0xFF));
+        }
+
+        return shortArray;
+    }
+    int sampleRate = 48000; // or the actual sample rate used
+    int channelCount = 2; // or the actual channel count
+    int bytesPerSample = 2; // for 16-bit PCM
     private void attemptMixAndEncode() {
-        // micDataBuffer 에 데이터를 저장하는 부분도 로그로 출력
-        Log.d(TAG, "Mic Data Buffer: " + Arrays.toString(micDataBuffer));
-        Log.d(TAG, "Speacker Data Buffer: " + Arrays.toString(speakerDataBuffer));
-        if (micDataBuffer == null || speakerDataBuffer == null) {
-            // Wait until both buffers are available
+        int bufferSize;
+        byte[] mixedData;
+        if (micDataBuffer != null && speakerDataBuffer != null) {
+            // Mix the audio samples
+            Log.d(TAG, "mixed");
+            mixedData = mixAudioBuffers(byteArrayToShortArray(micDataBuffer), byteArrayToShortArray(speakerDataBuffer));
+            bufferSize = mixedData.length;
+        } else if (micDataBuffer != null && speakerDataBuffer == null) {
+            Log.d(TAG, "mic");
+            return;
+        } else if (micDataBuffer == null && speakerDataBuffer != null) {
+            Log.d(TAG, "speaker");
+            return;
+        } else {
+            mixedData = new byte[0];
+            Log.d(TAG, "mic and spekaer data null");
             return;
         }
-        int bufferSize = Math.max(micDataBuffer.length, speakerDataBuffer.length);
-
-        // Mix the audio samples
-        byte[] mixedData = mixAudioBuffers(micDataBuffer, speakerDataBuffer, bufferSize);
         micDataBuffer = null;
         speakerDataBuffer = null;
 
@@ -316,12 +341,13 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
             ByteBuffer inputBuffer = mixedAudioEncoder.getInputBuffer(bufferIndex);
             if (inputBuffer != null) {
                 inputBuffer.clear();
-                inputBuffer.put(mixedData);
+                inputBuffer.put(mixedData, 0, bufferSize);
                 mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presTime, 0);
-                presTime += mixedData.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
+                presTime += mixedData.length * 125 / 12 * 2; // 1000000 microseconds / 48000hz / 2 bytes
             }
         }
         // Drain the encoder
+
         drainMixedAudioEncoder();
     }
 
