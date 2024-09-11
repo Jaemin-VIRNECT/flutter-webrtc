@@ -318,18 +318,14 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
         byte[] mixedData;
         if (micDataBuffer != null && speakerDataBuffer != null) {
             // Mix the audio samples
-            Log.d(TAG, "mixed");
             mixedData = mixAudioBuffers(byteArrayToShortArray(micDataBuffer), byteArrayToShortArray(speakerDataBuffer));
             bufferSize = mixedData.length;
         } else if (micDataBuffer != null && speakerDataBuffer == null) {
-            Log.d(TAG, "mic");
             return;
         } else if (micDataBuffer == null && speakerDataBuffer != null) {
-            Log.d(TAG, "speaker");
             return;
         } else {
             mixedData = new byte[0];
-            Log.d(TAG, "mic and spekaer data null");
             return;
         }
         micDataBuffer = null;
@@ -343,7 +339,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 inputBuffer.clear();
                 inputBuffer.put(mixedData, 0, bufferSize);
                 mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presTime, 0);
-                presTime += mixedData.length * 125 / 12 * 2; // 1000000 microseconds / 48000hz / 2 bytes
+                presTime += mixedData.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
             }
         }
         // Drain the encoder
