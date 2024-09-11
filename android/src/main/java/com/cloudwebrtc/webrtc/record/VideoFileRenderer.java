@@ -339,7 +339,7 @@ class VideoFileRenderer implements VideoSink, SamplesReadyCallback {
                 inputBuffer.clear();
                 inputBuffer.put(mixedData, 0, bufferSize);
                 mixedAudioEncoder.queueInputBuffer(bufferIndex, 0, mixedData.length, presTime, 0);
-                presTime += mixedData.length * 125 / 12; // 1000000 microseconds / 48000hz / 2 bytes
+                presTime += mixedData.length * 125 / 12 * 8; // 1000000 microseconds / 48000hz / 2 bytes
             }
         }
         // Drain the encoder
